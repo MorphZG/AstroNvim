@@ -18,32 +18,30 @@ function M.generate_snapshot(write)
     local commit = assert(astrocore.cmd({ "git", "-C", dir, "rev-parse", "HEAD" }, false))
     if commit then return vim.trim(commit) end
   end
-  local snapshot, module = {}, "return {\n"
-  local untracked_plugins = {
-    "AstroNvim/AstroNvim", -- Managed by user
-    "Bilal2453/luvit-meta", -- Not a real plugin, used for type stubs only
-  }
-  ---@type { [string]: fun(plugin: LazyPlugin): string}
-  local pin_overrides = {
+  local pinners = {
+    ["*"] = function(plugin)
+      return (plugin.version and ("version = %q"):format(plugin.version)) or ("commit = %q"):format(plugin.commit)
+    end,
+    ["AstroNvim/AstroNvim"] = false, -- Managed by user
+    ["Bilal2453/luvit-meta"] = false, -- Not a real plugin, used for type stubs only
     ["neovim/nvim-lspconfig"] = function(plugin)
       return ('commit = vim.fn.has "nvim-0.10" ~= 1 and "76e7c8b029e6517f3689390d6599e9b446551704" or %q'):format(
         plugin.commit
       )
     end,
-  }
+  } --[=[@as { [string]: false|fun(plugin: LazyPlugin): string?} ]=]
+  local snapshot, module = {}, "return {\n"
   for _, plugin in ipairs(plugins) do
-    if not vim.tbl_contains(untracked_plugins, plugin[1]) then
+    local pinner = vim.F.if_nil(pinners[plugin[1]], pinners["*"])
+    if pinner ~= false then
       plugin = { plugin[1], commit = git_commit(plugin.dir), version = plugin.version }
-      if prev_snapshot[plugin[1]] and prev_snapshot[plugin[1]].version then
-        plugin.version = prev_snapshot[plugin[1]].version
+      local prev_version = vim.tbl_get(prev_snapshot, plugin[1], "version")
+      if prev_version then plugin.version = prev_version end
+      local pin = pinner and pinner(plugin)
+      if pin then
+        module = module .. ("  { %q, "):format(plugin[1]) .. pin .. ", optional = true },\n"
+        table.insert(snapshot, plugin)
       end
-      module = module .. ("  { %q, "):format(plugin[1])
-      local override = pin_overrides[plugin[1]]
-      local pin = (override and override(plugin))
-        or (plugin.version and ("version = %q"):format(plugin.version))
-        or ("commit = %q"):format(plugin.commit)
-      module = module .. pin .. ", optional = true },\n"
-      table.insert(snapshot, plugin)
     end
   end
   module = module .. "}\n"
