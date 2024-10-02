@@ -23,6 +23,14 @@ function M.generate_snapshot(write)
     "AstroNvim/AstroNvim", -- Managed by user
     "Bilal2453/luvit-meta", -- Not a real plugin, used for type stubs only
   }
+  ---@type { [string]: fun(plugin: LazyPlugin): string}
+  local pin_overrides = {
+    ["neovim/nvim-lspconfig"] = function(plugin)
+      return ('commit = vim.fn.has "nvim-0.10" ~= 1 and "76e7c8b029e6517f3689390d6599e9b446551704" or %q'):format(
+        plugin.commit
+      )
+    end,
+  }
   for _, plugin in ipairs(plugins) do
     if not vim.tbl_contains(untracked_plugins, plugin[1]) then
       plugin = { plugin[1], commit = git_commit(plugin.dir), version = plugin.version }
@@ -30,12 +38,11 @@ function M.generate_snapshot(write)
         plugin.version = prev_snapshot[plugin[1]].version
       end
       module = module .. ("  { %q, "):format(plugin[1])
-      if plugin.version then
-        module = module .. ("version = %q"):format(plugin.version)
-      else
-        module = module .. ("commit = %q"):format(plugin.commit)
-      end
-      module = module .. ", optional = true },\n"
+      local override = pin_overrides[plugin[1]]
+      local pin = (override and override(plugin))
+        or (plugin.version and ("version = %q"):format(plugin.version))
+        or ("commit = %q"):format(plugin.commit)
+      module = module .. pin .. ", optional = true },\n"
       table.insert(snapshot, plugin)
     end
   end
